@@ -1,0 +1,82 @@
+name: Build Windows App
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:  # 允许手动触发工作流
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest]
+    
+    runs-on: ${{ matrix.platform }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          # 安装webview2
+          Invoke-WebRequest https://go.microsoft.com/fwlink/p/?LinkId=2124703 -OutFile webview2.exe
+          Start-Process -FilePath webview2.exe -Args "/silent /install" -Verb RunAs -Wait
+      
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          run_install: false
+      
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+      
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      
+      - name: Install dependencies
+        run: pnpm install
+      
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "HuLa v__VERSION__"
+          releaseBody: "请查看版本详情了解新功能。"
+          releaseDraft: true
+          prerelease: false
+      
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: HuLa-windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe 
